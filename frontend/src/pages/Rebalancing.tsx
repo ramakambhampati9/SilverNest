@@ -1,0 +1,22 @@
+import React, { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { ArrowDown, ArrowUp, Scale } from 'lucide-react';
+import { Card } from '../components/common/Card';
+import { InputField } from '../components/common/InputField';
+import { Button } from '../components/common/Button';
+import { rebalancingService } from '../services/rebalancingService';
+import { formatINR } from '../utils/currency';
+
+const schema = z.object({ goal_id: z.string().optional(), equity: z.number().min(0), debt: z.number().min(0), other: z.number().min(0), threshold: z.number().gt(0).max(100) }).refine(v => Math.abs(v.equity + v.debt + v.other - 100) < 0.01, { message: 'Target percentages must total 100%', path: ['equity'] });
+type FormData = z.infer<typeof schema>;
+
+export const Rebalancing: React.FC = () => {
+  const queryClient = useQueryClient(); const [scope, setScope] = useState<string | undefined>(); const [error, setError] = useState<string | null>(null);
+  const { data, isLoading } = useQuery({ queryKey: ['rebalancing', scope], queryFn: () => rebalancingService.getAllocations(scope) });
+  const { register, handleSubmit, formState: { errors } } = useForm<FormData>({ resolver: zodResolver(schema), defaultValues: { goal_id: '', equity: 60, debt: 30, other: 10, threshold: 5 } });
+  const mutation = useMutation({ mutationFn: (v: FormData) => rebalancingService.setAllocations(v.goal_id || undefined, [{ asset_class: 'equity', target_pct: v.equity, drift_threshold_pct: v.threshold }, { asset_class: 'debt', target_pct: v.debt, drift_threshold_pct: v.threshold }, { asset_class: 'other', target_pct: v.other, drift_threshold_pct: v.threshold }]), onSuccess: (_, v) => { setScope(v.goal_id || undefined); queryClient.invalidateQueries({ queryKey: ['rebalancing'] }); setError(null); }, onError: (e: Error) => setError(e.message) });
+  return <div className="rebalancing-page"><div className="page-header-row mb-4"><div><h2>Rebalancing</h2><p className="text-secondary">Compare target allocation with your current holdings. Suggestions are advisory only and never place trades.</p></div></div><div className="emergency-grid"><Card title="Set Target Allocation">{error && <div className="alert alert-danger mb-3">{error}</div>}<form onSubmit={handleSubmit(v => mutation.mutate(v))}><InputField label="Goal ID (optional — leave blank for overall portfolio)" {...register('goal_id')} /><div className="form-row-3 mt-3"><InputField label="Equity %" type="number" error={errors.equity?.message} {...register('equity', { valueAsNumber: true })} /><InputField label="Debt %" type="number" {...register('debt', { valueAsNumber: true })} /><InputField label="Other %" type="number" {...register('other', { valueAsNumber: true })} /></div><InputField className="mt-3" label="Drift alert threshold (%)" type="number" {...register('threshold', { valueAsNumber: true })} /><Button type="submit" className="w-100 mt-4" isLoading={mutation.isPending}>Save Targets</Button></form></Card><Card title="Portfolio Value" className="bg-surface-dark-subtle border-none"><Scale size={32} className="text-accent mb-2" /><h3>{formatINR(data?.portfolio_value || 0)}</h3><p className="text-secondary text-sm">Current value used for the allocation comparison.</p></Card></div><Card title="Target vs Current" className="mt-4">{isLoading ? <div className="skeleton skeleton-card" /> : data?.allocations.length ? <div className="allocation-list">{data.allocations.map(a => <div key={a.asset_class}><div className="d-flex justify-content-between text-sm mb-1"><strong className="text-capitalize">{a.asset_class}</strong><span>Target {a.target_pct}% · Current {a.current_pct}%</span></div><div className="comparison-bars"><div className="comparison-target" style={{ width: `${a.target_pct}%` }} /><div className="comparison-current" style={{ width: `${a.current_pct}%` }} /></div><div className={a.suggested_trade ? 'text-warning text-sm mt-1' : 'text-secondary text-sm mt-1'}>{a.suggested_trade ? <>{a.drift_pct > 0 ? <ArrowDown size={14} /> : <ArrowUp size={14} />} {a.suggested_trade}</> : `Within ${a.drift_threshold_pct}% drift threshold`} <span className="ms-2">({formatINR(a.current_value)})</span></div></div>)}</div> : <p className="text-secondary">Save targets to see allocation comparisons and suggestions.</p>}</Card></div>;
+};

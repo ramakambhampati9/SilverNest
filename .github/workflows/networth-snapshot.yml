@@ -1,0 +1,11 @@
+name: Net worth snapshot
+on:
+  schedule:
+    - cron: '15 0 * * *'
+  workflow_dispatch:
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record daily net worth snapshots
+        run: curl --fail --request POST "${{ secrets.API_BASE_URL }}/api/v1/dashboard/networth-snapshots" --header "Authorization: Bearer ${{ secrets.NOTIFICATION_API_KEY }}"
